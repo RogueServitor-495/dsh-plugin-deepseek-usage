@@ -1,0 +1,21 @@
+{
+  "name": "dsh-plugin-deepseek-usage",
+  "version": "0.1.0",
+  "description": "DeepSeek API usage monitor: today's token usage, estimated cost, and live balance in a top bar of the dsh web UI",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "license": "MIT",
+  "files": [
+    "lib"
+  ]
+}
