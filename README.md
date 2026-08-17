@@ -9,13 +9,13 @@
 | 分段 | 内容 | 数据来源 |
 |---|---|---|
 | 今日用量 | 当日总 token（输入/输出/缓存命中，悬停查看明细） | 会话存储中 `assistant/message` 事件携带的 provider 上报 usage |
-| 今日费用 | 当日预估费用（人民币，按峰谷时段拆分计价，悬停查看高峰/闲时明细与 USD） | 用量 × 可配置峰谷单价 |
-| 余额 | DeepSeek 账户当前余额（悬停查看充值/赠送明细） | 官方公开接口 `GET https://api.deepseek.com/user/balance` |
+| 今日费用 / 套餐 | DeepSeek：当日预估费用（人民币，峰谷拆分）；智谱：套餐名 + 版本徽标 | 用量 × 可配置峰谷单价 / 智谱 subscription 接口 |
+| 余额 / 额度 | DeepSeek：账户余额；智谱：5 小时额度百分比（悬停查看周/月额度 + 现金/资源包） | 各厂商余额/配额接口 |
 
 - 自动刷新间隔可配置（默认 5 分钟，面板可选 1 分钟~1 小时）；点击胶囊右侧 ↻ 手动刷新（页面重新可见时**不会**自动刷新）。
 - 可**自由拖拽**改变位置（按视口比例记忆，刷新/重启/窗口缩放后保持相对位置，不会拖出屏幕）。
-- 点击胶囊上的 ⚙ 打开**配置面板**：峰谷单价、高峰窗口、汇率、刷新间隔均可调，保存后立即生效。
-- 接口密钥复用 dsh 的凭据服务（`DEEPSEEK_API_KEY`，即 Web「模型设置」页写入的 key），不会暴露到浏览器。
+- 点击胶囊上的 ⚙ 打开**配置面板**：厂商、峰谷单价、高峰窗口、汇率、刷新间隔均可调，保存后立即生效。
+- 接口密钥复用 dsh 的凭据服务（`DEEPSEEK_API_KEY` / `ZHIPU_API_KEY`），不会暴露到浏览器。
 
 ## 安装
 
@@ -81,6 +81,21 @@ DeepSeek 自 2026-08-17 起对 V4 系列 API 采用**峰谷分级计价**（人�
 | deepseek-v4-pro | 输出 | ¥13.50 | ¥27.00 |
 
 > 以上价格直接来自官方定价页（2026-08-17 生效，模型版本 Flash-0731 / Pro-0813）。官方调整价格后，在 ⚙ 配置面板按模型修改即可；代码级默认值在 `lib/config.js` 的 `defaultModels()`。
+
+## 多厂商支持（DeepSeek / 智谱）
+
+插件支持在**厂商之间切换**，顶部胶囊按厂商展示不同的账户信息：
+
+| 厂商 | 余额/账户 | 用量/额度 | 凭据 |
+|---|---|---|---|
+| **DeepSeek** | 现金余额（官方 `/user/balance`） | 无官方配额 API，用量来自会话事件统计 | `DEEPSEEK_API_KEY` |
+| **智谱 (bigmodel.cn)** | 现金余额 + token 资源包 | **Coding Plan 套餐**：5 小时/周/月额度窗口（百分比 + 重置时间）、套餐名与版本 | `ZHIPU_API_KEY`（bigmodel.cn 原生 key） |
+
+智谱套餐支持识别**套餐版本**：`subscription` 接口的 `productName` 带「历史版本 V1 / 历史版本 V2」字样时，胶囊会显示版本徽标（V1 / V2）；无版本字样即为新版积分套餐。
+
+在 ⚙ 配置面板选择「厂商」并保存即可切换；切换后读取对应凭据（`ZHIPU_API_KEY` 需先在 Web「模型设置」页或凭据服务中配置）。
+
+> 智谱接口说明：Coding Plan 配额 `GET /api/monitor/usage/quota/limit`、套餐 `GET /api/biz/subscription/list`、现金账户 `GET /api/biz/account/query-customer-account-report`、资源包 `GET /api/biz/tokenAccounts/list/my`，认证用**原始 API key**（无 Bearer 前缀）。
 
 ## 配置面板（插件自带）
 

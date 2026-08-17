@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-deepseek-usage",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "DeepSeek API usage monitor: today's token usage, estimated cost, and live balance in a top bar of the dsh web UI",
   "type": "module",
   "main": "lib/index.js",
