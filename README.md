@@ -12,7 +12,7 @@
 | 今日费用 | 当日预估费用（人民币，按峰谷时段拆分计价，悬停查看高峰/闲时明细与 USD） | 用量 × 可配置峰谷单价 |
 | 余额 | DeepSeek 账户当前余额（悬停查看充值/赠送明细） | 官方公开接口 `GET https://api.deepseek.com/user/balance` |
 
-- 每 60 秒自动刷新；页面重新可见时立即刷新；点击胶囊右侧 ↻ 手动刷新。
+- 每 5 分钟自动刷新；点击胶囊右侧 ↻ 手动刷新（页面重新可见时**不会**自动刷新，避免后台扫描拖慢服务器）。
 - 可**自由拖拽**改变位置（拖到任意位置，位置记忆在 localStorage；刷新/重启后保持，不会拖出屏幕）。
 - 接口密钥复用 dsh 的凭据服务（`DEEPSEEK_API_KEY`，即 Web「模型设置」页写入的 key），不会暴露到浏览器。
 
@@ -39,6 +39,16 @@ dsh web
 
 - **服务端**（`lib/index.js`）：在 dsh web server 上注册 `GET /api/deepseek-usage`；用凭据 seam 解析 `DEEPSEEK_API_KEY`，调用官方余额接口（60s 缓存）；通过 `ctx.sessionQuery` 枚举所有会话（含已持久化的 zstd 日志），汇总当日 `assistant/message` 的 provider 上报 usage，并按请求发生时刻的峰谷单价分别估算费用。
 - **浏览器端**（`lib/client.js`）：零依赖 bundle，`window.__ModuleLoader__.load` 注册，直接向同源 `/api/deepseek-usage` 拉取并渲染固定顶部胶囊。
+
+## 性能设计
+
+「今日用量」需要扫描全部会话日志（解压 zstd + 重放校验），在会话库很大时会很慢。为避免拖垮 dsh 服务器，插件做了三件事：
+
+1. **长缓存 + 单飞**：聚合结果缓存 **5 分钟**（`AGGREGATE_TTL_MS = 300_000`）；扫描进行中后续请求**复用同一个 Promise**，不会并发触发多轮全量扫描。
+2. **可中止的会话读取**：读取走 `ctx.sessionPersistence.inspect(id, signal)`，每个会话有 **15 秒读取预算**（`SESSION_READ_TIMEOUT_MS`）；正在被其它实例持续写入、修订号永不稳定的会话会被**跳过**（计入 `sessionsSkipped`），而不是无限重试阻塞事件循环。
+3. **低频轮询**：浏览器端每 **5 分钟**才拉一次（且移除了标签页可见时的自动刷新），平时服务器上不会反复出现扫描。
+
+> 注意：若 `sessionsSkipped > 0`，说明有会话日志正在被其它 dsh 实例写入而未被统计，属预期行为；扫描间隙该会话数据仍会正常累计。
 
 ## 计费策略（2026-08-17 起，DeepSeek 峰谷分级计价）
 
@@ -81,7 +91,8 @@ DeepSeek 自 2026-08-17 起对 V4 系列 API 采用**峰谷分级计价**（人�
   "pricing": { "currency": "CNY", "model": "deepseek-v4-flash", "peak": { "inputCacheMiss": 3.0, "inputCacheHit": 0.1, "output": 9.0 }, "offPeak": { "inputCacheMiss": 1.5, "inputCacheHit": 0.05, "output": 4.5 }, "usdCny": 7.15 },
   "period": { "now": "offPeak", "windows": [ { "startHour": 9, "endHour": 12 }, { "startHour": 14, "endHour": 18 } ], "timezone": "Asia/Shanghai (UTC+8)" },
   "sessionsScanned": 12,
-  "sessionsFailed": 0
+  "sessionsFailed": 0,
+  "sessionsSkipped": 1
 }
 ```
 
