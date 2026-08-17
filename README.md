@@ -37,18 +37,27 @@ dsh web
 
 ## 工作原理
 
-- **服务端**（`lib/index.js`）：在 dsh web server 上注册 `GET /api/deepseek-usage`；用凭据 seam 解析 `DEEPSEEK_API_KEY`，调用官方余额接口（60s 缓存）；通过 `ctx.sessionQuery` 枚举所有会话（含已持久化的 zstd 日志），汇总当日 `assistant/message` 的 provider 上报 usage，并按请求发生时刻的峰谷单价分别估算费用。
+- **服务端**（`lib/index.js`）：在 dsh web server 上注册 `GET /api/deepseek-usage`；用凭据 seam 解析 `DEEPSEEK_API_KEY`，调用官方余额接口（60s 缓存）；当日用量由**增量记账**提供（见下），按请求发生时刻的峰谷单价分别估算费用。
 - **浏览器端**（`lib/client.js`）：零依赖 bundle，`window.__ModuleLoader__.load` 注册，直接向同源 `/api/deepseek-usage` 拉取并渲染固定顶部胶囊。
 
-## 性能设计
+## 增量记账（核心设计）
 
-「今日用量」需要扫描全部会话日志（解压 zstd + 重放校验），在会话库很大时会很慢。为避免拖垮 dsh 服务器，插件做了三件事：
+插件**不再每次请求都扫描会话日志**，而是实时记账：
 
-1. **长缓存 + 单飞**：聚合结果缓存 **5 分钟**（`AGGREGATE_TTL_MS = 300_000`）；扫描进行中后续请求**复用同一个 Promise**，不会并发触发多轮全量扫描。
-2. **可中止的会话读取**：读取走 `ctx.sessionPersistence.inspect(id, signal)`，每个会话有 **15 秒读取预算**（`SESSION_READ_TIMEOUT_MS`）；正在被其它实例持续写入、修订号永不稳定的会话会被**跳过**（计入 `sessionsSkipped`），而不是无限重试阻塞事件循环。
-3. **低频轮询**：浏览器端每 **5 分钟**才拉一次（且移除了标签页可见时的自动刷新），平时服务器上不会反复出现扫描。
+1. **事件订阅**：通过 `ctx.on("session/event")` 订阅每个会话的实时事件；`assistant/message` 携带的 provider usage 直接累加进内存账本（O(1) 算术，无解析/无重放）。
+2. **按天分桶**：账本按本地日期分桶，同时按高峰/闲时窗口拆分，与计费口径一致。
+3. **持久化**：账本节流落盘到 dsh home 下的 `deepseek-usage-ledger.json`（默认每 30 秒，原子写）；重启后从文件恢复，**当日数据存在则完全免扫描**。
+4. **查询 O(1)**：API 直接读内存账本，毫秒级返回。
 
-> 注意：若 `sessionsSkipped > 0`，说明有会话日志正在被其它 dsh 实例写入而未被统计，属预期行为；扫描间隙该会话数据仍会正常累计。
+**全量扫描仅作为兜底**，且只发生一次：
+
+- 首次启动（无账本文件），或
+- 跨天后当日无记录，或
+- 修改了高峰窗口（账本分桶不再匹配，清空重建）
+
+兜底扫描仍保持之前的防护：单飞（并发复用一次）、每个会话 15 秒读取超时（`SESSION_READ_TIMEOUT_MS`）、被其它实例持续写入的会话跳过（`sessionsSkipped`）。
+
+> 提示：接口返回 `fromLedger: true` 表示本次数据来自实时账本（零扫描），胶囊条悬停也会标注「实时增量」/「会话扫描」。
 
 ## 计费策略（2026-08-17 起，DeepSeek 峰谷分级计价）
 
@@ -90,9 +99,10 @@ DeepSeek 自 2026-08-17 起对 V4 系列 API 采用**峰谷分级计价**（人�
   "cost": { "cny": 0.120415, "usd": 0.016841, "peakCny": 0.067510, "offPeakCny": 0.052905 },
   "pricing": { "currency": "CNY", "model": "deepseek-v4-flash", "peak": { "inputCacheMiss": 3.0, "inputCacheHit": 0.1, "output": 9.0 }, "offPeak": { "inputCacheMiss": 1.5, "inputCacheHit": 0.05, "output": 4.5 }, "usdCny": 7.15 },
   "period": { "now": "offPeak", "windows": [ { "startHour": 9, "endHour": 12 }, { "startHour": 14, "endHour": 18 } ], "timezone": "Asia/Shanghai (UTC+8)" },
-  "sessionsScanned": 12,
+  "fromLedger": true,
+  "sessionsScanned": 0,
   "sessionsFailed": 0,
-  "sessionsSkipped": 1
+  "sessionsSkipped": 0
 }
 ```
 
