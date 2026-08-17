@@ -75,15 +75,15 @@ DeepSeek 自 2026-08-17 起对 V4 系列 API 采用**峰谷分级计价**（人�
 
 | 字段 | 说明 | 默认值 |
 |---|---|---|
-| peak 输入/输出单价 | 高峰时段（默认北京时间 09:00–12:00、14:00–18:00）单价，元 / 百万 token | 0.10 / 3.00 / 9.00 |
-| offPeak 输入/输出单价 | 空闲时段单价，元 / 百万 token | 0.05 / 1.50 / 4.50 |
-| peakWindows | 高峰时段窗口（startHour / endHour，北京时间） | 09–12、14–18 |
+| models | **按模型分别计价**：每个模型独立的 peak / offPeak 单价（元 / 百万 token）；可添加/移除模型 | deepseek-v4-flash、deepseek-v4-pro 两档 |
+| peakWindows | 高峰时段窗口（startHour / endHour，北京时间）——**任意数量，可增删**，删到 0 表示全天闲时 | 09–12、14–18 |
 | usdCny | CNY→USD 参考汇率（仅费用换算显示用） | 7.15 |
 | refreshIntervalMs | 悬浮胶囊自动刷新间隔 | 5 分钟 |
 
+- **按模型计费**：request/header 事件携带模型 ID（如 deepseek-v4-flash / deepseek-v4-pro），插件按会话跟踪模型，assistant/message 用量落入对应模型桶，费用按各自单价计算；未配置的模型回退到第一个已配置模型。
 - **保存后立即生效**（live）：下次请求即按新单价/新窗口重新计费；修改窗口会清空当日账本并自动重建基线；
 - **恢复默认**：一键重置为内置默认价；
-- 配置持久化到 dsh home 下的 `deepseek-usage-config.json`；部分修改（如只改 offPeak.output）时其余字段自动保持默认价。
+- 配置持久化到 dsh home 下的 deepseek-usage-config.json；部分修改（如只改某模型的 offPeak.output）时其余字段自动保持默认价。
 
 ## 悬浮窗位置（相对定位）
 
