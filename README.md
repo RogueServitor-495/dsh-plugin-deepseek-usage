@@ -49,16 +49,23 @@ DeepSeek 自 2026-08-17 起对 V4 系列 API 采用**峰谷分级计价**（人�
 - 每个请求按**发生时刻**落入对应时段计费，费用=高峰部分 + 空闲部分分别累加；
 - 顶部胶囊会显示当前时段徽标（高峰红色 / 闲时绿色），悬停费用可查看峰谷拆分。
 
-默认按 deepseek-v4-flash 刊例价（人民币 / 每百万 token）：
+## 配置界面（Web 设置页）
 
-| 项目 | 空闲时段 | 高峰时段 |
+插件注册了 `deepseek-usage` 设置项，在 dsh Web **设置（Settings）页**自动渲染为表单，无需改代码即可调整计费策略：
+
+| 字段 | 说明 | 默认值 |
 |---|---|---|
-| 输入（缓存命中） | ¥0.05 / 1M | ¥0.10 / 1M |
-| 输入（缓存未命中） | ¥1.50 / 1M | ¥3.00 / 1M |
-| 输出 | ¥4.50 / 1M | ¥9.00 / 1M |
-| CNY→USD 参考汇率 | 7.15（仅显示用） |
+| peak 输入/输出单价 | 高峰时段（默认北京时间 09:00–12:00、14:00–18:00）单价，元 / 百万 token | 0.10 / 3.00 / 9.00 |
+| offPeak 输入/输出单价 | 空闲时段单价，元 / 百万 token | 0.05 / 1.50 / 4.50 |
+| peakWindows | 高峰时段窗口（startHour / endHour，北京时间，可增删） | 09–12、14–18 |
+| usdCny | CNY→USD 参考汇率（仅费用换算显示用） | 7.15 |
+| model / currency | 计费模型标识与币种（展示用） | deepseek-v4-flash / CNY |
 
-> 价格为估算值，非官方账单；官方实时价格见 <https://api-docs.deepseek.com/quick_start/pricing>。修改 `lib/usage.js` 中的 `DEFAULT_PRICING`（`peak` / `offPeak` 两档）即可调整。
+- 修改后**立即生效**（live）：下次请求即按新单价/新窗口重新计费，无需重启；
+- 部分修改（如只改 offPeak.output）时其余字段自动保持官方默认价，不会误置为 0；
+- 未在设置页配置时使用内置默认价（即上表）。
+
+> 价格为估算值，非官方账单；官方实时价格见 <https://api-docs.deepseek.com/quick_start/pricing>。代码级默认值在 `lib/usage.js` 的 `DEFAULT_PRICING` / `PEAK_WINDOWS`，设置页覆盖它们。
 
 ## 接口返回示例
 
@@ -84,7 +91,7 @@ DeepSeek 自 2026-08-17 起对 V4 系列 API 采用**峰谷分级计价**（人�
 - 平台站点的详细用量/费用接口（`platform.deepseek.com/api/v0/usage/*`）需要浏览器登录态 token，API key 无法访问，故不采用。
 - 请求数 `requests` 为当日带 usage 上报的 assistant 消息条数。
 - 峰谷时段按**北京时间（UTC+8）**判定（DeepSeek 官方口径），不随服务器时区变化；单日内跨时段的请求各自计入对应档位。
-- 高峰/闲时单价为估算值，实际账单以官方计费为准；官方调整价格时修改 `lib/usage.js` 的 `DEFAULT_PRICING` 即可。
+- 高峰/闲时单价与高峰窗口为估算值，实际账单以官方计费为准；官方调整价格时，在 Web 设置页的 `deepseek-usage` 表单中修改即可（代码默认值在 `lib/usage.js` 的 `DEFAULT_PRICING` / `PEAK_WINDOWS`）。
 
 ---
 

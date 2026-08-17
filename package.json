@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-deepseek-usage",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek API usage monitor: today's token usage, estimated cost, and live balance in a top bar of the dsh web UI",
   "type": "module",
   "main": "lib/index.js",
@@ -13,6 +13,13 @@
     "client": {
       "platform": "web"
     }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
   },
   "license": "MIT",
   "files": [
