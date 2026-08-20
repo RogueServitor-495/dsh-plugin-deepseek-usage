@@ -97,6 +97,41 @@ DeepSeek 自 2026-08-17 起对 V4 系列 API 采用**峰谷分级计价**（人�
 
 > 智谱接口说明：Coding Plan 配额 `GET /api/monitor/usage/quota/limit`、套餐 `GET /api/biz/subscription/list`、现金账户 `GET /api/biz/account/query-customer-account-report`、资源包 `GET /api/biz/tokenAccounts/list/my`，认证用**原始 API key**（无 Bearer 前缀）。
 
+## 额度打满自动续跑（可选，默认关闭）
+
+配合 Coding Plan / 额度套餐场景：当一次模型请求因**额度耗尽（QUOTA）**失败时，插件可以记住这个会话，等额度窗口重置后自动唤醒 agent 继续被中断的任务，省去手动重启。
+
+### 原理
+
+- 监听每个会话 agent 的 `agent/request-error` 事件；当失败码为 `QUOTA`（官方 `dsh-llm` 对额度/余额耗尽的标准分类）时，落盘一条持久化的待续跑记录；
+- 续跑时刻优先取提供商配额接口返回的**最近一个未来的额度重置时间**（如智谱 5 小时/周/月窗口的 `nextResetTime`、Kimi `/coding/v1/usages` 的 `resetTime`），拿不到时回退到 `defaultRetryDelayMs`；
+- 到点后若 agent 空闲且额度确已恢复，向该会话注入一条「[额度重置 · 自动续跑]」消息，模型依据完整会话历史与工作区现状继续任务；
+- **不修改任何 dsh 核心流程**：只用公开的 `agent/request-error` 事件与 `Agent.followup()` API（与官方 `@deepseek-ai/dsh-schedule` 同一套机制）。
+
+### 配置（`deepseek-usage-config.json` 的 `resume` 节）
+
+| 字段 | 说明 | 默认值 |
+|---|---|---|
+| `resume.enabled` | 是否开启自动续跑（**默认关闭**，开启前请确认这是你想要的行为） | `false` |
+| `resume.maxAttempts` | 每个会话最多自动续跑次数（防循环：任务所需额度超过单窗口时会失败两次后停止） | `2` |
+| `resume.defaultRetryDelayMs` | 拿不到额度重置时间时的回退等待时长 | `1800000`（30 分钟） |
+
+开启示例：
+
+```json
+{
+  "resume": { "enabled": true, "maxAttempts": 2, "defaultRetryDelayMs": 1800000 }
+}
+```
+
+### 行为细节与限制
+
+- 记录持久化在 dsh home 下的 `deepseek-usage-resume.json`（原子写），dsh web 重启后自动扫描恢复；
+- 续跑只作用于**当前仍打开/已恢复的会话**；会话关闭期间记录保持待续跑状态，重新打开会话时自动续上（与官方 schedule 的冷会话限制一致）；
+- 到点时会先复查配额是否真的恢复（避免把模型叫醒后立刻再次失败），未恢复则继续等待重查；
+- 若会话正在被用户使用（agent 处于运行中），自动续跑会推迟，绝不打断进行中的对话；
+- 触发续跑的前提是失败码为 `QUOTA`。请**不要**给带额度套餐的提供商配置 `retryPolicy.mode: always`——always 模式会无限重试包括额度在内的一切失败，使会话一直卡在重试中，自动续跑将永远等不到 idle。
+
 ## 配置面板（插件自带）
 
 > 说明：dsh 当前的设置（Settings）页只暴露内置 namespace，第三方插件暂无法注册配置页（dsh 待办功能）。因此本插件**自带配置面板**：点击悬浮胶囊条上的 ⚙ 图标打开。
