@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-deepseek-usage",
-  "version": "0.5.0",
-  "description": "DeepSeek API usage monitor: today's token usage, estimated cost, and live balance in a top bar of the dsh web UI",
+  "version": "0.6.0",
+  "description": "LLM usage monitor for the dsh web UI: follows the current conversation's model (DeepSeek balance/cost, glm-coding-plan & kimi-coding quota windows), with an expandable per-model daily stats panel",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
