@@ -102,6 +102,30 @@ DeepSeek 自 2026-08-17 起对 V4 系列 API 采用**峰谷分级计价**（人�
 
 > 智谱接口说明：Coding Plan 配额 `GET /api/monitor/usage/quota/limit`、套餐 `GET /api/biz/subscription/list`、现金账户 `GET /api/biz/account/query-customer-account-report`、资源包 `GET /api/biz/tokenAccounts/list/my`，认证用**原始 API key**（无 Bearer 前缀）。
 
+## 为延时执行插件提供配额数据
+
+本分支（`feat/quota-data-service`）只做一件事：把本插件掌握的**配额数据**以 cordis 服务的形式暴露给延时执行插件（`dsh-plugin-quota-resume`），后者据此实现「额度打满 → 等重置 → 自动续跑」。
+
+### 提供的服务：`deepseekUsageQuota`
+
+插件加载后在 host 作用域 `ctx.provide("deepseekUsageQuota", ...)` 注册，消费方用 `ctx.get("deepseekUsageQuota")` 可选读取（**无硬依赖**：未安装本插件时延时插件回退到固定延迟）。服务包含三个方法：
+
+| 方法 | 说明 |
+|---|---|
+| `mapProvider(providerHint)` | 把失败请求的路由 provider id（如 `kimi-coding`、`litellm`）映射为计费 provider（`kimi`/`zhipu`/`deepseek`），无法识别返回 `null` |
+| `resolveApiKey(providerId)` | 通过 dsh 凭据 seam 解析该 provider 的 API key（60s 缓存），未配置返回 `null` |
+| `fetchQuotaWindows(providerId, key)` | 调 provider 配额接口，返回归一化的额度窗口数组，每项含 `used`/`limit`/`resetsAt`（重置时间戳）；失败返回 `null` |
+
+### 为什么这样拆
+
+- 延时执行的**触发与唤醒逻辑**（`agent/request-error` 监听、持久化记录、定时器、`Agent.followup()` 续跑）与 provider 无关，独立成插件便于单独开发/测试/开关；
+- 配额数据的**获取与归一化**（各厂商接口、凭据、窗口换算）已经在本插件的 provider adapter 里实现，作为服务复用，避免两处维护同一套接口逻辑；
+- 双方通过公开 cordis 服务解耦：usage 插件只负责“数据”，延时插件只负责“行为”。
+
+### 加载顺序
+
+`cordis.patch.yml` 中 `dsh-plugin-quota-resume` 的行必须排在 `dsh-plugin-deepseek-usage` 之后（消费方晚于提供方注册）。
+
 ## 配置面板（插件自带）
 
 > 说明：dsh 当前的设置（Settings）页只暴露内置 namespace，第三方插件暂无法注册配置页（dsh 待办功能）。因此本插件**自带配置面板**：点击悬浮胶囊条上的 ⚙ 图标打开。
