@@ -97,40 +97,29 @@ DeepSeek 自 2026-08-17 起对 V4 系列 API 采用**峰谷分级计价**（人�
 
 > 智谱接口说明：Coding Plan 配额 `GET /api/monitor/usage/quota/limit`、套餐 `GET /api/biz/subscription/list`、现金账户 `GET /api/biz/account/query-customer-account-report`、资源包 `GET /api/biz/tokenAccounts/list/my`，认证用**原始 API key**（无 Bearer 前缀）。
 
-## 额度打满自动续跑（可选，默认关闭）
+## 为延时执行插件提供配额数据
 
-配合 Coding Plan / 额度套餐场景：当一次模型请求因**额度耗尽（QUOTA）**失败时，插件可以记住这个会话，等额度窗口重置后自动唤醒 agent 继续被中断的任务，省去手动重启。
+本分支（`feat/quota-data-service`）只做一件事：把本插件掌握的**配额数据**以 cordis 服务的形式暴露给延时执行插件（`dsh-plugin-quota-resume`），后者据此实现「额度打满 → 等重置 → 自动续跑」。
 
-### 原理
+### 提供的服务：`deepseekUsageQuota`
 
-- 监听每个会话 agent 的 `agent/request-error` 事件；当失败码为 `QUOTA`（官方 `dsh-llm` 对额度/余额耗尽的标准分类）时，落盘一条持久化的待续跑记录；
-- 续跑时刻优先取提供商配额接口返回的**最近一个未来的额度重置时间**（如智谱 5 小时/周/月窗口的 `nextResetTime`、Kimi `/coding/v1/usages` 的 `resetTime`），拿不到时回退到 `defaultRetryDelayMs`；
-- 到点后若 agent 空闲且额度确已恢复，向该会话注入一条「[额度重置 · 自动续跑]」消息，模型依据完整会话历史与工作区现状继续任务；
-- **不修改任何 dsh 核心流程**：只用公开的 `agent/request-error` 事件与 `Agent.followup()` API（与官方 `@deepseek-ai/dsh-schedule` 同一套机制）。
+插件加载后在 host 作用域 `ctx.provide("deepseekUsageQuota", ...)` 注册，消费方用 `ctx.get("deepseekUsageQuota")` 可选读取（**无硬依赖**：未安装本插件时延时插件回退到固定延迟）。服务包含三个方法：
 
-### 配置（`deepseek-usage-config.json` 的 `resume` 节）
+| 方法 | 说明 |
+|---|---|
+| `mapProvider(providerHint)` | 把失败请求的路由 provider id（如 `kimi-coding`、`litellm`）映射为计费 provider（`kimi`/`zhipu`/`deepseek`），无法识别返回 `null` |
+| `resolveApiKey(providerId)` | 通过 dsh 凭据 seam 解析该 provider 的 API key（60s 缓存），未配置返回 `null` |
+| `fetchQuotaWindows(providerId, key)` | 调 provider 配额接口，返回归一化的额度窗口数组，每项含 `used`/`limit`/`resetsAt`（重置时间戳）；失败返回 `null` |
 
-| 字段 | 说明 | 默认值 |
-|---|---|---|
-| `resume.enabled` | 是否开启自动续跑（**默认关闭**，开启前请确认这是你想要的行为） | `false` |
-| `resume.maxAttempts` | 每个会话最多自动续跑次数（防循环：任务所需额度超过单窗口时会失败两次后停止） | `2` |
-| `resume.defaultRetryDelayMs` | 拿不到额度重置时间时的回退等待时长 | `1800000`（30 分钟） |
+### 为什么这样拆
 
-开启示例：
+- 延时执行的**触发与唤醒逻辑**（`agent/request-error` 监听、持久化记录、定时器、`Agent.followup()` 续跑）与 provider 无关，独立成插件便于单独开发/测试/开关；
+- 配额数据的**获取与归一化**（各厂商接口、凭据、窗口换算）已经在本插件的 provider adapter 里实现，作为服务复用，避免两处维护同一套接口逻辑；
+- 双方通过公开 cordis 服务解耦：usage 插件只负责“数据”，延时插件只负责“行为”。
 
-```json
-{
-  "resume": { "enabled": true, "maxAttempts": 2, "defaultRetryDelayMs": 1800000 }
-}
-```
+### 加载顺序
 
-### 行为细节与限制
-
-- 记录持久化在 dsh home 下的 `deepseek-usage-resume.json`（原子写），dsh web 重启后自动扫描恢复；
-- 续跑只作用于**当前仍打开/已恢复的会话**；会话关闭期间记录保持待续跑状态，重新打开会话时自动续上（与官方 schedule 的冷会话限制一致）；
-- 到点时会先复查配额是否真的恢复（避免把模型叫醒后立刻再次失败），未恢复则继续等待重查；
-- 若会话正在被用户使用（agent 处于运行中），自动续跑会推迟，绝不打断进行中的对话；
-- 触发续跑的前提是失败码为 `QUOTA`。请**不要**给带额度套餐的提供商配置 `retryPolicy.mode: always`——always 模式会无限重试包括额度在内的一切失败，使会话一直卡在重试中，自动续跑将永远等不到 idle。
+`cordis.patch.yml` 中 `dsh-plugin-quota-resume` 的行必须排在 `dsh-plugin-deepseek-usage` 之后（消费方晚于提供方注册）。
 
 ## 配置面板（插件自带）
 
